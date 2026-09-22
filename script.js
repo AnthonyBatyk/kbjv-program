@@ -1,0 +1,614 @@
+document.addEventListener("DOMContentLoaded", () => {
+  "use strict";
+
+  const PRODUCTS_KEY = "kbjv_products";
+  const CALCULATOR_KEY = "kbjv_calculator";
+  const ARCHIVE_KEY = "kbjv_archive";
+  const ACTIVE_TAB_KEY = "kbjv_active_tab";
+  const CALCULATOR_DRAFT_KEY = "kbjv_calculator_draft";
+  const SORT_KEY = "kbjv_product_sort";
+  const CONSOLE_KEY = "kbjv_console";
+  const EXPORT_VERSION_KEY = "kbjv_export_version";
+  const DATABASE_UPDATED_KEY = "kbjv_database_updated_at";
+  const EXPORT_FINGERPRINT_KEY = "kbjv_export_fingerprint";
+
+  let products = [];
+  let calculatorItems = [];
+  let archiveItems = [];
+  let selectedProduct = null;
+  let editingProduct = null;
+  let draggedCard = null;
+  let reorderMode = false;
+  let reorderChanged = false;
+  let archiveEditingId = null;
+  let archiveOriginalText = null;
+  let currentSort = localStorage.getItem(SORT_KEY) || "manual";
+  let sortTarget = "blocks";
+  let consoleItems = [];
+  let draggedCalcIndex = null;
+  let calculatorReorderMode = false;
+  let calculatorReorderChanged = false;
+
+  const $ = id => document.getElementById(id);
+  const tabs = document.querySelectorAll(".tab");
+  const pages = document.querySelectorAll(".page");
+  const grid = $("grid");
+  const searchInput = $("search");
+  const clearSearch = $("clear-search");
+  const exportButton = $("export-products");
+  const importButton = $("import-products");
+  const importFile = $("import-file");
+  const addProductButton = $("add-product");
+  const deleteProductButton = $("delete-product");
+  const reorderProductsButton = $("reorder-products");
+  const sortProductsButton = $("sort-products");
+
+  const productModal = $("product-modal");
+  const productModalName = $("product-modal-name");
+  const productWeight = $("product-weight");
+  const productCancel = $("product-cancel");
+  const productCopy = $("product-copy");
+  const productCalculator = $("product-calculator");
+
+  const addProductModal = $("add-product-modal");
+  const addProductCancel = $("add-product-cancel");
+  const addProductSave = $("add-product-save");
+  const newProductName = $("new-product-name");
+  const newProductKcal = $("new-product-kcal");
+  const newProductProtein = $("new-product-protein");
+  const newProductFat = $("new-product-fat");
+  const newProductCarb = $("new-product-carb");
+  const newProductSugar = $("new-product-sugar");
+  const newProductSalt = $("new-product-salt");
+  const newProductDescription = $("new-product-description");
+
+  const editProductModal = $("edit-product-modal");
+  const editProductCancel = $("edit-product-cancel");
+  const editProductSave = $("edit-product-save");
+  const editProductName = $("edit-product-name");
+  const editProductKcal = $("edit-product-kcal");
+  const editProductProtein = $("edit-product-protein");
+  const editProductFat = $("edit-product-fat");
+  const editProductCarb = $("edit-product-carb");
+  const editProductSugar = $("edit-product-sugar");
+  const editProductSalt = $("edit-product-salt");
+  const editProductDescription = $("edit-product-description");
+
+  const sortProductsModal = $("sort-products-modal");
+  const sortOldest = $("sort-oldest");
+  const sortNewest = $("sort-newest");
+  const sortProductsCancel = $("sort-products-cancel");
+
+  const deleteProductModal = $("delete-product-modal");
+  const deleteProductList = $("delete-product-list");
+  const deleteProductCancelTop = $("delete-product-cancel-top");
+  const deleteProductCancelBottom = $("delete-product-cancel-bottom");
+  const deleteSortProducts = $("delete-sort-products");
+
+  const calcInput = $("calc-input");
+  const calcAdd = $("calc-add");
+  const calcClearText = $("calc-clear-text");
+  const calcClearBlocks = $("calc-clear-blocks");
+  const calcSection = $("calc-section");
+  const kcalElement = $("kcal");
+  const proteinElement = $("protein");
+  const fatElement = $("fat");
+  const carbElement = $("carb");
+  const sugarElement = $("sugar");
+  const saltElement = $("salt");
+  const copyTotal = $("copy-total");
+  const saveArchive = $("save-archive");
+  const reorderCalculatorHistory = $("reorder-calculator-history");
+  const calcLog = $("calc-log");
+  const archiveLog = $("archive-log");
+  const siteProductsCount = $("site-products-count");
+  const siteArchiveCount = $("site-archive-count");
+  const siteDatabaseUpdated = $("site-database-updated");
+  const consoleLog = $("console-log");
+  const statsChart = $("stats-chart");
+  const statsEmpty = $("stats-empty");
+  const statsFrom = $("stats-from");
+  const statsTo = $("stats-to");
+  const statsMetricButtons = document.querySelectorAll(".stats-metric");
+  let statsMetric = "kcal";
+
+  const archiveTextModal = $("archive-text-modal");
+  const archiveTextInput = $("archive-text-input");
+  const archiveTextCancel = $("archive-text-cancel");
+  const archiveTextSave = $("archive-text-save");
+
+  const statusStyle = document.createElement("style");
+  statusStyle.textContent = `
+    .button-status-success{background:#22c55e!important;color:#fff!important;box-shadow:0 0 0 1px rgba(34,197,94,.35),0 0 18px rgba(34,197,94,.35)!important}
+    .button-status-error{background:#ef4444!important;color:#fff!important;box-shadow:0 0 0 1px rgba(239,68,68,.35),0 0 18px rgba(239,68,68,.35)!important}
+    .button-status-info{background:#7289da!important;color:#fff!important;box-shadow:0 0 0 1px rgba(114,137,218,.35),0 0 18px rgba(114,137,218,.35)!important}
+    .button-status-success::after{content:"✓";margin-left:7px;font-weight:800}
+    .button-status-error::after{content:"✕";margin-left:7px;font-weight:800}
+  `;
+  document.head.appendChild(statusStyle);
+
+  function clearButtonStatus(button) {
+    button?.classList.remove("button-status-success","button-status-error","button-status-info");
+  }
+  function showButtonState(button,text,state,duration=1500) {
+    if (!button) return;
+    if (!button.dataset.originalText) button.dataset.originalText = button.textContent.trim();
+    clearTimeout(button._statusTimeout);
+    clearButtonStatus(button);
+    button.textContent = text;
+    if (state) button.classList.add(`button-status-${state}`);
+    if (duration > 0) button._statusTimeout = setTimeout(() => {
+      button.textContent = button.dataset.originalText || "";
+      clearButtonStatus(button);
+    }, duration);
+  }
+  function setButtonStatusPermanent(button,text,state) { showButtonState(button,text,state,0); }
+
+  function formatConsoleDate(date = new Date()) {
+    const d=String(date.getDate()).padStart(2,"0"),m=String(date.getMonth()+1).padStart(2,"0"),y=date.getFullYear();
+    const h=String(date.getHours()).padStart(2,"0"),mi=String(date.getMinutes()).padStart(2,"0"),se=String(date.getSeconds()).padStart(2,"0");
+    return `${d}.${m}.${y} ${h}:${mi}:${se}`;
+  }
+  function saveConsoleLocal(){ localStorage.setItem(CONSOLE_KEY,JSON.stringify(consoleItems)); }
+  function logAction(message){
+    consoleItems.push({id:createId("console"),time:new Date().toISOString(),message:String(message ?? "Невідома дія")});
+    saveConsoleLocal(); renderConsole();
+  }
+  function renderConsole(){
+    if(!consoleLog)return; consoleLog.innerHTML="";
+    if(!consoleItems.length){consoleLog.innerHTML='<div class="console-entry">Журнал дій порожній.</div>';return;}
+    [...consoleItems].reverse().forEach(item=>{
+      const row=document.createElement("div");row.className="console-entry";
+      const dt=item.time?new Date(item.time):new Date();row.textContent=`[${formatConsoleDate(dt)}] ${item.message}`;consoleLog.append(row);
+    });
+  }
+
+  function createId(prefix="id") { return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2,9)}`; }
+  function number(value) { const n=Number(value); return Number.isFinite(n)?n:0; }
+  function round(value,decimals=1) { const f=10**decimals; return Math.round((number(value)+Number.EPSILON)*f)/f; }
+  function formatNumber(value) { return number(value).toFixed(2); }
+  function getInitials(name) {
+    const words=String(name||"").trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return "?";
+    return words.length===1?words[0].slice(0,2).toUpperCase():(words[0][0]+words[1][0]).toUpperCase();
+  }
+  function normalizeProduct(product,index=0) {
+    return {
+      id:String(product.id ?? createId("product")),
+      name:String(product.name ?? "").trim(),
+      kcal:number(product.kcal),
+      protein:number(product.protein ?? product.proteins),
+      fat:number(product.fat),
+      carb:number(product.carb ?? product.carbs),
+      sugar:number(product.sugar ?? product.sugars),
+      salt:number(product.salt),
+      unit:product.unit==="мл"?"мл":"г",
+      full_name:String(product.full_name ?? product.description ?? "").trim(),
+      created_at:String(product.created_at || new Date(2000,0,1,0,0,index).toISOString())
+    };
+  }
+  function loadArray(key) {
+    try { const p=JSON.parse(localStorage.getItem(key)||"[]"); return Array.isArray(p)?p:[]; } catch { return []; }
+  }
+  function saveProductsLocal(){
+    localStorage.setItem(PRODUCTS_KEY,JSON.stringify(products));
+    localStorage.setItem(DATABASE_UPDATED_KEY,new Date().toISOString());
+    updateSiteDataCounts();
+  }
+  function saveCalculatorLocal(){ localStorage.setItem(CALCULATOR_KEY,JSON.stringify(calculatorItems)); }
+  function saveArchiveLocal(){ localStorage.setItem(ARCHIVE_KEY,JSON.stringify(archiveItems)); }
+  function saveCalculatorDraft(){ if(calcInput)localStorage.setItem(CALCULATOR_DRAFT_KEY,calcInput.value); }
+  function updateSiteDataCounts(){
+    if(siteProductsCount)siteProductsCount.textContent=String(products.length);
+    if(siteArchiveCount)siteArchiveCount.textContent=String(archiveItems.length);
+    if(siteDatabaseUpdated){
+      const raw=localStorage.getItem(DATABASE_UPDATED_KEY);
+      if(!raw){siteDatabaseUpdated.textContent="Ще не оновлювалася";}
+      else{const d=new Date(raw);siteDatabaseUpdated.textContent=`${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()} о ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;}
+    }
+  }
+  function exportFingerprint(){
+    return JSON.stringify({products:products.map((p,i)=>normalizeProduct(p,i)),archive:archiveItems});
+  }
+  function getExportVersion(){
+    const fingerprint=exportFingerprint();
+    const previous=localStorage.getItem(EXPORT_FINGERPRINT_KEY);
+    let version=Math.max(0,parseInt(localStorage.getItem(EXPORT_VERSION_KEY)||"0",10)||0);
+    if(previous!==fingerprint){version+=1;localStorage.setItem(EXPORT_VERSION_KEY,String(version));localStorage.setItem(EXPORT_FINGERPRINT_KEY,fingerprint);}
+    if(version<1){version=1;localStorage.setItem(EXPORT_VERSION_KEY,"1");localStorage.setItem(EXPORT_FINGERPRINT_KEY,fingerprint);}
+    return version;
+  }
+  function getSortedProducts() {
+    const arr=[...products];
+    if(currentSort==="oldest") arr.sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+    if(currentSort==="newest") arr.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+    return arr;
+  }
+
+  tabs.forEach(tab=>tab.addEventListener("click",()=>{
+    const target=tab.dataset.tab;
+    tabs.forEach(t=>t.classList.remove("active"));
+    pages.forEach(p=>p.classList.remove("active"));
+    tab.classList.add("active");
+    $(target)?.classList.add("active");
+    localStorage.setItem(ACTIVE_TAB_KEY,target);
+    if(target==="archive"){renderArchive();requestAnimationFrame(()=>renderStatistics());}
+    if(target==="calculator"){renderCalculatorLog();updateTotals();}
+    if(target==="console")renderConsole();
+  }));
+
+  function renderProducts(filter="") {
+    if(!grid)return;
+    updateSiteDataCounts();
+    const q=String(filter).trim().toLowerCase();
+    grid.innerHTML="";
+    const filtered=getSortedProducts().filter(p=>!q||p.name.toLowerCase().includes(q)||p.full_name.toLowerCase().includes(q));
+    if(!filtered.length){
+      const empty=document.createElement("div");
+      empty.style.cssText="grid-column:1/-1;text-align:center;padding:30px;color:var(--text-secondary)";
+      empty.textContent="Продуктів не знайдено.";
+      grid.appendChild(empty); return;
+    }
+    filtered.forEach(p=>grid.appendChild(createProductCard(p)));
+    updateReorderState();
+  }
+
+  function iconCopy(){
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M16 21H6a2 2 0 0 1-2-2V7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="8" y="3" width="13" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/></svg><span class="tooltip">Скопіювати</span>`;
+  }
+  function iconEdit(){
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 20h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="tooltip">Редагувати</span>`;
+  }
+  function createProductCard(product){
+    const card=document.createElement("article");
+    card.className="food-card"; card.dataset.id=product.id;
+    const actions=document.createElement("div"); actions.className="card-actions";
+    const copy=document.createElement("button"); copy.type="button"; copy.className="copy-btn"; copy.innerHTML=iconCopy();
+    const edit=document.createElement("button"); edit.type="button"; edit.className="edit-btn"; edit.innerHTML=iconEdit();
+    copy.addEventListener("click",e=>{e.stopPropagation();openProductModal(product);});
+    edit.addEventListener("click",e=>{e.stopPropagation();openEditProductModal(product);});
+    actions.append(copy,edit);
+
+    const title=document.createElement("div"); title.className="food-title";
+    const badge=document.createElement("div"); badge.className="badge"; badge.textContent=getInitials(product.name);
+    const tc=document.createElement("div");
+    const name=document.createElement("div"); name.className="name"; name.textContent=product.name;
+    const meta=document.createElement("div"); meta.className="meta"; meta.textContent=`100 ${product.unit||"г"}`;
+    tc.append(name,meta); title.append(badge,tc);
+
+    const kbjv=document.createElement("div"); kbjv.className="kbjv";
+    const row=(key,val,unit="г")=>`<div class="row"><div class="key">${key}</div><div class="val">${formatNumber(val)} ${unit}</div></div>`;
+    kbjv.innerHTML =
+      row("Калорії",product.kcal,"ккал") +
+      `<div class="kbjv-divider"></div>` +
+      row("Білки",product.protein) + row("Жири",product.fat) + row("Вуглеводи",product.carb) +
+      `<div class="kbjv-divider"></div>` +
+      row("Цукри",product.sugar) + row("Сіль",product.salt) +
+      `<div class="kbjv-divider"></div>`;
+
+    const full=document.createElement("div"); full.className="full-name"; full.textContent=product.full_name||"";
+    card.append(actions,title,kbjv,full);
+    card.addEventListener("click",e=>{if(!reorderMode&&!e.target.closest(".card-actions"))openProductModal(product);});
+    return card;
+  }
+
+  searchInput?.addEventListener("input",()=>{renderProducts(searchInput.value);clearSearch.style.display=searchInput.value?"block":"none";});
+  clearSearch?.addEventListener("click",()=>{searchInput.value="";clearSearch.style.display="none";renderProducts();searchInput.focus();});
+
+  function openProductModal(product){selectedProduct=product;productModalName.textContent=product.name;productWeight.value="100";productModal.classList.add("active");}
+  function closeProductModal(){selectedProduct=null;productModal.classList.remove("active");}
+  productCancel?.addEventListener("click",closeProductModal);
+  productModal?.addEventListener("click",e=>{if(e.target===productModal)closeProductModal();});
+
+  function calculateProduct(product,weight){
+    const m=number(weight)/100;
+    return {kcal:product.kcal*m,protein:product.protein*m,fat:product.fat*m,carb:product.carb*m,sugar:product.sugar*m,salt:product.salt*m};
+  }
+  function getProductSummary(product,weight){
+    const v=calculateProduct(product,weight);
+    return `${product.name}, для ${formatNumber(weight)} грам - ${formatNumber(v.kcal)} ккал / ${formatNumber(v.protein)} білка / ${formatNumber(v.fat)} жирів / ${formatNumber(v.carb)} вуглеводів / ${formatNumber(v.sugar)} цукрів / ${formatNumber(v.salt)} солі`;
+  }
+  async function copyText(text){
+    try{await navigator.clipboard.writeText(text);return true;}catch{
+      const t=document.createElement("textarea");t.value=text;t.style.position="fixed";t.style.left="-9999px";document.body.append(t);t.select();document.execCommand("copy");t.remove();return true;
+    }
+  }
+  productCopy?.addEventListener("click",async()=>{
+    if(!selectedProduct)return; const w=number(productWeight.value); if(w<=0)return productWeight.focus();
+    if(await copyText(getProductSummary(selectedProduct,w))){showButtonState(productCopy,"Скопійовано","success",1200);logAction(`Скопійовано продукт «${selectedProduct.name}» (${formatNumber(w)} г).`);}
+  });
+  productCalculator?.addEventListener("click",()=>{
+    if(!selectedProduct)return; const w=number(productWeight.value); if(w<=0)return productWeight.focus();
+    const productName=selectedProduct.name;
+    const text=getProductSummary(selectedProduct,w);
+    const current=calcInput.value.trim(); calcInput.value=current?`${current}\n${text}`:text; saveCalculatorDraft();
+    closeProductModal(); showButtonState(productCalculator,"Додано","success",1500); logAction(`Продукт «${productName}» додано в калькулятор.`);
+  });
+
+  function clearAddForm(){
+    [newProductName,newProductKcal,newProductProtein,newProductFat,newProductCarb,newProductSugar,newProductSalt,newProductDescription].forEach(el=>el.value="");
+  }
+  addProductButton?.addEventListener("click",()=>{clearAddForm();addProductModal.classList.add("active");setTimeout(()=>newProductName.focus(),50);});
+  addProductCancel?.addEventListener("click",()=>{addProductModal.classList.remove("active");showButtonState(addProductButton,"Продукт не додано","error",1500);logAction("Додавання продукту скасовано.");});
+  addProductModal?.addEventListener("click",e=>{if(e.target===addProductModal)addProductModal.classList.remove("active");});
+  addProductSave?.addEventListener("click",()=>{
+    const name=newProductName.value.trim(); if(!name)return newProductName.focus();
+    products.push(normalizeProduct({
+      id:createId("product"),name,kcal:newProductKcal.value,protein:newProductProtein.value,fat:newProductFat.value,
+      carb:newProductCarb.value,sugar:newProductSugar.value,salt:newProductSalt.value,unit:"г",
+      full_name:newProductDescription.value.trim(),created_at:new Date().toISOString()
+    }));
+    saveProductsLocal();renderProducts(searchInput?.value||"");addProductModal.classList.remove("active");
+    showButtonState(addProductButton,"Продукт додано","success",1500); logAction(`Додано продукт «${name}».`);
+  });
+
+  function openEditProductModal(product){
+    editingProduct=product;
+    editProductName.value=product.name;editProductKcal.value=product.kcal;editProductProtein.value=product.protein;
+    editProductFat.value=product.fat;editProductCarb.value=product.carb;editProductSugar.value=product.sugar;
+    editProductSalt.value=product.salt;editProductDescription.value=product.full_name||"";
+    editProductModal.classList.add("active");setTimeout(()=>editProductName.focus(),50);
+  }
+  function closeEditProductModal(){editingProduct=null;editProductModal.classList.remove("active");}
+  editProductCancel?.addEventListener("click",()=>{const n=editingProduct?.name||"продукту";closeEditProductModal();showButtonState(editProductSave,"Не збережено","error",1500);logAction(`Редагування «${n}» скасовано.`);});
+  editProductModal?.addEventListener("click",e=>{if(e.target===editProductModal)closeEditProductModal();});
+  editProductSave?.addEventListener("click",()=>{
+    if(!editingProduct)return;
+    const name=editProductName.value.trim(); if(!name)return editProductName.focus();
+    Object.assign(editingProduct,{
+      name,kcal:number(editProductKcal.value),protein:number(editProductProtein.value),fat:number(editProductFat.value),
+      carb:number(editProductCarb.value),sugar:number(editProductSugar.value),salt:number(editProductSalt.value),
+      full_name:editProductDescription.value.trim()
+    });
+    saveProductsLocal();renderProducts(searchInput?.value||"");closeEditProductModal();
+    showButtonState(editProductSave,"Збережено","success",1500); logAction(`Зміни продукту «${name}» збережено.`);
+  });
+
+  function openSortModal(target="blocks"){sortTarget=target;sortProductsModal.classList.add("active");}
+  sortProductsButton?.addEventListener("click",()=>openSortModal("blocks"));
+  deleteSortProducts?.addEventListener("click",()=>openSortModal("delete"));
+  sortProductsCancel?.addEventListener("click",()=>{sortProductsModal.classList.remove("active");const b=sortTarget==="delete"?deleteSortProducts:sortProductsButton;showButtonState(b,"Не відсортовано","error",1500);logAction("Сортування продуктів скасовано.");});
+  sortProductsModal?.addEventListener("click",e=>{if(e.target===sortProductsModal)sortProductsModal.classList.remove("active");});
+  function applySort(mode){
+    currentSort=mode;localStorage.setItem(SORT_KEY,mode);sortProductsModal.classList.remove("active");
+    renderProducts(searchInput?.value||""); if(deleteProductModal.classList.contains("active"))renderDeleteProductList();
+    showButtonState(sortTarget==="delete"?deleteSortProducts:sortProductsButton,mode==="oldest"?"Старіші → новіші":"Новіші → старіші","success",1500); logAction(`Продукти відсортовано: ${mode==="oldest"?"від старіших до новіших":"від новіших до старіших"}.`);
+  }
+  sortOldest?.addEventListener("click",()=>applySort("oldest"));
+  sortNewest?.addEventListener("click",()=>applySort("newest"));
+
+  deleteProductButton?.addEventListener("click",()=>{renderDeleteProductList();deleteProductModal.classList.add("active");});
+  [deleteProductCancelTop,deleteProductCancelBottom].forEach(b=>b?.addEventListener("click",()=>{deleteProductModal.classList.remove("active");showButtonState(deleteProductButton,"Продукт не видалено","error",1500);logAction("Видалення продукту скасовано.");}));
+  deleteProductModal?.addEventListener("click",e=>{if(e.target===deleteProductModal)deleteProductModal.classList.remove("active");});
+  function renderDeleteProductList(){
+    deleteProductList.innerHTML="";
+    const list=getSortedProducts();
+    if(!list.length){deleteProductList.innerHTML='<div class="delete-product-empty">База продуктів порожня.</div>';return;}
+    list.forEach(product=>{
+      const item=document.createElement("div");item.className="delete-product-item";
+      const name=document.createElement("div");name.className="delete-product-item-name";name.textContent=product.name;
+      const button=document.createElement("button");button.className="delete-product-item-button";button.textContent="Видалити";
+      button.addEventListener("click",()=>{
+        if(!confirm(`Видалити продукт "${product.name}"?`))return;
+        products=products.filter(p=>p.id!==product.id);saveProductsLocal();renderProducts(searchInput?.value||"");renderDeleteProductList();
+        showButtonState(deleteProductButton,"Продукт видалено","success",1500); logAction(`Видалено продукт «${product.name}».`);
+      });
+      item.append(name,button);deleteProductList.append(item);
+    });
+  }
+
+  reorderProductsButton?.addEventListener("click",()=>{
+    if(!reorderMode){reorderMode=true;reorderChanged=false;currentSort="manual";localStorage.setItem(SORT_KEY,"manual");setButtonStatusPermanent(reorderProductsButton,"Завершити зміну розташування?","info");updateReorderState();return;}
+    reorderMode=false;updateReorderState();showButtonState(reorderProductsButton,reorderChanged?"Розташування змінено":"Розташування не змінено",reorderChanged?"success":"error",1800);logAction(reorderChanged?"Розташування продуктів змінено.":"Зміну розташування продуктів завершено без змін.");
+  });
+  function updateReorderState(){
+    if(!grid)return;grid.classList.toggle("reorder-mode",reorderMode);
+    grid.querySelectorAll(".food-card").forEach(card=>{card.draggable=reorderMode;if(reorderMode)attachDragEvents(card);});
+  }
+  function attachDragEvents(card){
+    card.ondragstart=e=>{draggedCard=card;card.classList.add("dragging");e.dataTransfer.setData("text/plain",card.dataset.id);};
+    card.ondragend=()=>{card.classList.remove("dragging");draggedCard=null;};
+    card.ondragover=e=>{e.preventDefault();if(draggedCard&&draggedCard!==card)card.classList.add("drag-over");};
+    card.ondragleave=()=>card.classList.remove("drag-over");
+    card.ondrop=e=>{
+      e.preventDefault();card.classList.remove("drag-over");if(!draggedCard||draggedCard===card)return;
+      const from=products.findIndex(p=>p.id===draggedCard.dataset.id),to=products.findIndex(p=>p.id===card.dataset.id);
+      if(from<0||to<0)return;const [moved]=products.splice(from,1);products.splice(to,0,moved);reorderChanged=true;saveProductsLocal();renderProducts(searchInput?.value||"");
+    };
+  }
+
+  exportButton?.addEventListener("click",()=>{
+    if(!confirm(`Експортувати базу продуктів та архів?\n\nБуде експортовано ${products.length} продуктів і ${archiveItems.length} записів архіву.`)){showButtonState(exportButton,"Не експортовано","error",1800);logAction("Експорт бази та архіву скасовано.");return;}
+    const version=getExportVersion();
+    const data={version,exported_at:new Date().toISOString(),products:products.map((p,i)=>normalizeProduct(p,i)),archive:archiveItems};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");
+    a.href=url;a.download=`version-${version}.json`;document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url);
+    showButtonState(exportButton,"Експортовано","success",1800);logAction(`Експортовано version-${version}: ${products.length} продуктів, ${archiveItems.length} записів архіву.`);
+  });
+  let importDialogOpened=false;
+  importButton?.addEventListener("click",()=>{importDialogOpened=true;importFile?.click();});
+  window.addEventListener("focus",()=>{
+    if(!importDialogOpened)return;
+    setTimeout(()=>{
+      if(importFile && (!importFile.files || importFile.files.length===0)){showButtonState(importButton,"Не імпортовано","error",1500);logAction("Імпорт бази скасовано.");}
+      importDialogOpened=false;
+    },200);
+  });
+  importFile?.addEventListener("change",async()=>{
+    const file=importFile.files?.[0];if(!file)return;
+    try{
+      const parsed=JSON.parse(await file.text());const arr=Array.isArray(parsed)?parsed:parsed.products;
+      if(!Array.isArray(arr))throw new Error("Невірний формат");
+      const normalized=arr.map((p,i)=>normalizeProduct(p,i)).filter(p=>p.name);
+      if(!normalized.length)throw new Error("Порожня база");
+      const hasArchive=!Array.isArray(parsed)&&Array.isArray(parsed.archive);
+      const importedArchive=hasArchive?parsed.archive:[];
+      const archiveText=hasArchive?` і ${importedArchive.length} записів архіву`:"";
+      if(!confirm(`Імпортувати ${normalized.length} продуктів${archiveText}?\n\nПоточні імпортовані дані будуть замінені.`)){showButtonState(importButton,"Не імпортовано","error",1500);logAction("Імпорт бази скасовано.");return;}
+      products=normalized;
+      if(hasArchive)archiveItems=importedArchive;
+      saveProductsLocal();if(hasArchive)saveArchiveLocal();
+      if(!Array.isArray(parsed)&&Number.isFinite(Number(parsed.version))){localStorage.setItem(EXPORT_VERSION_KEY,String(Math.max(1,Number(parsed.version))));localStorage.setItem(EXPORT_FINGERPRINT_KEY,exportFingerprint());}
+      renderProducts(searchInput?.value||"");renderArchive();renderStatistics();updateSiteDataCounts();
+      showButtonState(importButton,"Імпортовано","success",1500);logAction(`Імпортовано ${products.length} продуктів${hasArchive?` і ${archiveItems.length} записів архіву`:"; архів не змінювався"}.`);
+    }catch(e){console.error(e);showButtonState(importButton,"Не імпортовано","error",1500);logAction("Помилка імпорту бази.");alert("Не вдалося імпортувати базу.\n\nПеревірте JSON-файл.");}
+    finally{importFile.value="";importDialogOpened=false;}
+  });
+
+  function parseCalculatorLine(line){
+    const clean=String(line).trim().replace(/\s+/g," ");if(!clean)return null;
+    const re=/^(.+?),\s*для\s*([\d.,]+)\s*(?:грам|г|мл)\s*-\s*([\d.,]+)\s*ккал\s*\/\s*([\d.,]+)\s*білка\s*\/\s*([\d.,]+)\s*жирів\s*\/\s*([\d.,]+)\s*вуглеводів(?:\s*\/\s*([\d.,]+)\s*цукрів)?(?:\s*\/\s*([\d.,]+)\s*солі)?/i;
+    const m=clean.match(re);
+    if(m)return{id:createId("calc"),name:m[1].trim(),weight:number(m[2].replace(",",".")),kcal:number(m[3].replace(",",".")),protein:number(m[4].replace(",",".")),fat:number(m[5].replace(",",".")),carb:number(m[6].replace(",",".")),sugar:number((m[7]||"0").replace(",",".")),salt:number((m[8]||"0").replace(",",".")),text:clean,created_at:new Date().toISOString()};
+    const km=clean.match(/^[+]?\s*([\d.,]+)\s*(?:ккал|калор(?:і|и|ій|ія|ійність)?)\s*$/i);
+    if(km)return{id:createId("calc"),name:clean,weight:0,kcal:number(km[1].replace(",",".")),protein:0,fat:0,carb:0,sugar:0,salt:0,text:clean,created_at:new Date().toISOString()};
+    return{id:createId("calc"),name:clean,weight:0,kcal:0,protein:0,fat:0,carb:0,sugar:0,salt:0,text:clean,created_at:new Date().toISOString()};
+  }
+  calcInput?.addEventListener("input",saveCalculatorDraft);
+  calcAdd?.addEventListener("click",()=>{
+    const text=calcInput.value.trim();if(!text){showButtonState(calcAdd,"Немає даних","error",1500);logAction("Додавання в калькулятор не виконано: поле порожнє.");return;}
+    const items=text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).map(parseCalculatorLine).filter(Boolean);
+    calculatorItems.push(...items);saveCalculatorLocal();renderCalculatorLog();updateTotals();calcInput.value="";localStorage.removeItem(CALCULATOR_DRAFT_KEY);showButtonState(calcAdd,"Додано","success",1500); logAction(`У калькулятор додано записів: ${items.length}.`);
+  });
+  calcSection?.addEventListener("click",()=>{calculatorItems.push({text:"/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/-/",kcal:0,protein:0,fat:0,carb:0,sugar:0,salt:0});saveCalculatorLocal();renderCalculatorLog();showButtonState(calcSection,"Додано","success",1500);logAction("У калькулятор додано розділ.");});
+  calcClearText?.addEventListener("click",()=>{if(!calcInput.value.trim()){showButtonState(calcClearText,"Немає даних","error",1500);logAction("Очищення тексту не виконано: поле вже порожнє.");return;}calcInput.value="";localStorage.removeItem(CALCULATOR_DRAFT_KEY);showButtonState(calcClearText,"Очищено","success",1500);logAction("Поле введення калькулятора очищено.");});
+  calcClearBlocks?.addEventListener("click",()=>{if(!calculatorItems.length){showButtonState(calcClearBlocks,"Немає даних","error",1500);logAction("Очищення історії калькулятора не виконано: історія порожня.");return;}if(!confirm("Очистити всю історію калькулятора?")){showButtonState(calcClearBlocks,"Не очищено","error",1500);logAction("Очищення історії калькулятора скасовано.");return;}calculatorItems=[];saveCalculatorLocal();renderCalculatorLog();updateTotals();showButtonState(calcClearBlocks,"Очищено","success",1500);logAction("Історію калькулятора очищено.");});
+  function updateTotals(){
+    const t=calculatorItems.reduce((a,i)=>{for(const k of ["kcal","protein","fat","carb","sugar","salt"])a[k]+=number(i[k]);return a;},{kcal:0,protein:0,fat:0,carb:0,sugar:0,salt:0});
+    kcalElement.textContent=formatNumber(t.kcal);proteinElement.textContent=formatNumber(t.protein);fatElement.textContent=formatNumber(t.fat);carbElement.textContent=formatNumber(t.carb);sugarElement.textContent=formatNumber(t.sugar);saltElement.textContent=formatNumber(t.salt);
+  }
+  function renderCalculatorLog(){
+    calcLog.innerHTML="";
+    calcLog.classList.toggle("calc-history-reorder-mode",calculatorReorderMode);
+    if(!calculatorItems.length){calcLog.innerHTML='<div style="padding:10px 0;">Історія порожня.</div>';return;}
+    calculatorItems.forEach((item,index)=>{
+      const row=document.createElement("div");row.className="log-item calc-log-item";row.dataset.index=String(index);
+      const text=document.createElement("span");text.className="calc-log-text";text.textContent=item.text||item.name||"";
+      const remove=document.createElement("button");remove.className="remove";remove.textContent="Видалити";remove.onclick=()=>{const removed=calculatorItems[index];calculatorItems.splice(index,1);saveCalculatorLocal();renderCalculatorLog();updateTotals();logAction(`З калькулятора видалено: ${removed?.text||removed?.name||"запис"}.`);};
+      const move=document.createElement("div");move.className="calc-history-move";
+      const up=document.createElement("button");up.className="calc-move-button";up.textContent="↑";up.title="Перемістити вище";up.disabled=index===0;
+      const down=document.createElement("button");down.className="calc-move-button";down.textContent="↓";down.title="Перемістити нижче";down.disabled=index===calculatorItems.length-1;
+      up.onclick=()=>{if(index<=0)return;[calculatorItems[index-1],calculatorItems[index]]=[calculatorItems[index],calculatorItems[index-1]];calculatorReorderChanged=true;renderCalculatorLog();};
+      down.onclick=()=>{if(index>=calculatorItems.length-1)return;[calculatorItems[index],calculatorItems[index+1]]=[calculatorItems[index+1],calculatorItems[index]];calculatorReorderChanged=true;renderCalculatorLog();};
+      move.append(up,down);
+      const actions=document.createElement("div");actions.className="calc-log-actions";actions.append(remove,move);
+      row.append(text,actions);calcLog.append(row);
+    });
+  }
+  reorderCalculatorHistory?.addEventListener("click",()=>{
+    if(!calculatorItems.length){showButtonState(reorderCalculatorHistory,"Немає історії","error",1600);logAction("Зміну розташування історії не розпочато: історія порожня.");return;}
+    if(!calculatorReorderMode){
+      calculatorReorderMode=true;calculatorReorderChanged=false;
+      setButtonStatusPermanent(reorderCalculatorHistory,"Готово","info");
+      renderCalculatorLog();
+      logAction("Розпочато зміну розташування історії калькулятора.");
+      return;
+    }
+    calculatorReorderMode=false;
+    if(calculatorReorderChanged){
+      saveCalculatorLocal();updateTotals();renderCalculatorLog();
+      showButtonState(reorderCalculatorHistory,"Розташування змінено","success",1800);
+      logAction("Розташування історії калькулятора змінено.");
+    }else{
+      renderCalculatorLog();
+      showButtonState(reorderCalculatorHistory,"Розташування не змінено","error",1800);
+      logAction("Зміну розташування історії калькулятора завершено без змін.");
+    }
+  });
+  function getTotalSummary(){return `Денний підсумок: ${kcalElement.textContent} калорій / ${proteinElement.textContent} білка / ${fatElement.textContent} жирів / ${carbElement.textContent} вуглеводів / ${sugarElement.textContent} цукрів / ${saltElement.textContent} солі`;}
+  copyTotal?.addEventListener("click",async()=>{if(await copyText(getTotalSummary()))showButtonState(copyTotal,"Скопійовано","success",1500);logAction("Денний підсумок скопійовано.");});
+  function getCurrentDate(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;}
+  saveArchive?.addEventListener("click",()=>{if(!calculatorItems.length){showButtonState(saveArchive,"Немає даних","error",1500);logAction("Збереження в архів не виконано: калькулятор порожній.");return alert("Немає даних для збереження в архів.");}archiveItems.unshift({id:createId("archive"),date:getCurrentDate(),text:getTotalSummary(),kcal:number(kcalElement.textContent),protein:number(proteinElement.textContent),fat:number(fatElement.textContent),carb:number(carbElement.textContent),sugar:number(sugarElement.textContent),salt:number(saltElement.textContent),created_at:new Date().toISOString()});saveArchiveLocal();renderArchive();renderStatistics();showButtonState(saveArchive,"Збережено","success",1500);logAction("Денний підсумок збережено в архів.");});
+  function formatArchiveDate(v){const m=String(v||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}.${m[2]}.${m[1]}`:v;}
+  function renderArchive(){
+    updateSiteDataCounts();
+    archiveLog.innerHTML="";if(!archiveItems.length){archiveLog.innerHTML='<div style="padding:10px 0;">Архів порожній.</div>';return;}
+    archiveItems.forEach(item=>{
+      const row=document.createElement("div");row.className="log-item archive-item";
+      const content=document.createElement("div");content.className="archive-content";
+      const date=document.createElement("div");date.style.fontWeight="600";date.style.color="var(--text-main)";date.textContent=formatArchiveDate(item.date);
+      const text=document.createElement("div");text.textContent=item.text;content.append(date,text);
+      const actions=document.createElement("div");actions.className="archive-actions";
+      const ed=document.createElement("button");ed.className="edit-date";ed.textContent="Дата";
+      const et=document.createElement("button");et.className="edit-text";et.textContent="Текст";
+      const rm=document.createElement("button");rm.className="remove";rm.textContent="Видалити";
+      ed.onclick=()=>editArchiveDate(item,date);et.onclick=()=>openArchiveTextModal(item);rm.onclick=()=>{if(confirm("Видалити цей запис з архіву?")){archiveItems=archiveItems.filter(a=>a.id!==item.id);saveArchiveLocal();renderArchive();renderStatistics();logAction("Запис видалено з архіву.");}else{showButtonState(rm,"Не видалено","error",1500);logAction("Видалення запису з архіву скасовано.");}};
+      actions.append(ed,et,rm);row.append(content,actions);archiveLog.append(row);
+    });
+  }
+  function editArchiveDate(item,dateElement){
+    if(dateElement.querySelector("input"))return;const original=item.date||"";const input=document.createElement("input");input.type="date";input.className="archive-date-input";input.value=original||getCurrentDate();dateElement.textContent="";dateElement.append(input);input.focus();
+    let done=false;const finish=()=>{if(done)return;done=true;if(input.value&&input.value!==original){item.date=input.value;saveArchiveLocal();logAction(`Дата запису архіву змінена з ${original} на ${input.value}.`);renderStatistics();}else{logAction("Зміну дати архіву завершено без змін.");}renderArchive();};input.addEventListener("change",finish,{once:true});input.addEventListener("blur",finish,{once:true});
+  }
+  function openArchiveTextModal(item){archiveEditingId=item.id;archiveOriginalText=item.text||"";archiveTextInput.value=item.text||"";archiveTextModal.classList.add("active");setTimeout(()=>archiveTextInput.focus(),50);}
+  function closeArchiveTextModal(){archiveEditingId=null;archiveOriginalText=null;archiveTextModal.classList.remove("active");}
+  archiveTextCancel?.addEventListener("click",()=>{closeArchiveTextModal();showButtonState(archiveTextCancel,"Скасовано","error",1500);logAction("Редагування тексту архіву скасовано.");});
+  archiveTextModal?.addEventListener("click",e=>{if(e.target===archiveTextModal)closeArchiveTextModal();});
+  archiveTextSave?.addEventListener("click",()=>{const item=archiveItems.find(a=>a.id===archiveEditingId);if(!item)return closeArchiveTextModal();const text=archiveTextInput.value.trim();if(!text)return archiveTextInput.focus();if(text!==archiveOriginalText){item.text=text;saveArchiveLocal();renderArchive();showButtonState(archiveTextSave,"Збережено","success",1500);logAction("Текст запису архіву змінено.");}else{showButtonState(archiveTextSave,"Не змінено","error",1500);logAction("Текст запису архіву залишено без змін.");}closeArchiveTextModal();});
+
+  function parseArchiveMetrics(item){
+    const result={kcal:number(item.kcal),protein:number(item.protein),fat:number(item.fat),carb:number(item.carb),sugar:number(item.sugar),salt:number(item.salt)};
+    if(Object.values(result).some(v=>v!==0))return result;
+    const t=String(item.text||"");
+    const patterns={kcal:/([\d.,]+)\s*(?:калорій|ккал)/i,protein:/([\d.,]+)\s*білка/i,fat:/([\d.,]+)\s*жирів/i,carb:/([\d.,]+)\s*вуглеводів/i,sugar:/([\d.,]+)\s*цукрів/i,salt:/([\d.,]+)\s*солі/i};
+    for(const [k,re] of Object.entries(patterns)){const m=t.match(re);if(m)result[k]=number(m[1].replace(",","."));}
+    return result;
+  }
+  function setupStatisticsDates(){
+    const dates=archiveItems.map(i=>i.date).filter(Boolean).sort();
+    if(!dates.length)return;
+    if(!statsFrom.value)statsFrom.value=dates[0];
+    if(!statsTo.value)statsTo.value=dates[dates.length-1];
+  }
+  function renderStatistics(){
+    if(!statsChart)return;
+    const archivePage=document.getElementById("archive");
+    if(!archivePage?.classList.contains("active"))return;
+    setupStatisticsDates();
+    const from=statsFrom.value||"0000-01-01",to=statsTo.value||"9999-12-31";
+    const points=archiveItems.filter(i=>i.date>=from&&i.date<=to).map(i=>({date:i.date,value:parseArchiveMetrics(i)[statsMetric]})).sort((a,b)=>a.date.localeCompare(b.date));
+    const ctx=statsChart.getContext("2d"),rect=statsChart.getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(300,rect.width),h=Math.max(260,rect.height);
+    statsChart.width=w*dpr;statsChart.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+    if(points.length<3){statsEmpty.style.display="flex";return;}statsEmpty.style.display="none";
+    const pad={l:55,r:18,t:20,b:45},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b,vals=points.map(p=>p.value),min=Math.min(...vals),max=Math.max(...vals),range=max-min||1;
+    const css=getComputedStyle(document.documentElement),primary=css.getPropertyValue("--primary-color").trim(),secondary=css.getPropertyValue("--text-secondary").trim(),accent=css.getPropertyValue("--bg-card").trim();
+    const bodyStyle=getComputedStyle(document.body);ctx.font=`12px ${bodyStyle.fontFamily}`;ctx.textAlign="left";ctx.lineWidth=1;ctx.strokeStyle=accent;ctx.fillStyle=secondary;
+    for(let i=0;i<=4;i++){const y=pad.t+ch*i/4;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();const v=max-range*i/4;ctx.fillText(formatNumber(v),5,y+4);}
+    const coords=points.map((p,i)=>({x:pad.l+(points.length===1?0:cw*i/(points.length-1)),y:pad.t+ch*(max-p.value)/range,...p}));
+    ctx.strokeStyle=primary;ctx.lineWidth=2;ctx.beginPath();coords.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();
+    ctx.fillStyle="#ef4444";ctx.strokeStyle="#ef4444";coords.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,4.5,0,Math.PI*2);ctx.fill();});
+    ctx.font=`11px ${bodyStyle.fontFamily}`;ctx.textAlign="center";ctx.textBaseline="middle";coords.forEach(p=>{
+      const label=formatNumber(p.value),metrics=ctx.measureText(label),boxW=metrics.width+10,boxH=20;
+      let labelY=p.y+20;if(labelY+boxH/2>h-pad.b-2)labelY=p.y-20;
+      const x=Math.max(boxW/2+2,Math.min(w-boxW/2-2,p.x));
+      ctx.fillStyle=css.getPropertyValue("--bg-card").trim();ctx.strokeStyle="#ef4444";ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.roundRect(x-boxW/2,labelY-boxH/2,boxW,boxH,5);ctx.fill();ctx.stroke();
+      ctx.fillStyle=css.getPropertyValue("--text-main").trim();ctx.fillText(label,x,labelY);
+    });ctx.textBaseline="alphabetic";
+    ctx.textAlign="left";ctx.fillStyle=secondary;const step=Math.max(1,Math.ceil(points.length/6));coords.forEach((p,i)=>{if(i%step===0||i===coords.length-1){const label=p.date.slice(8,10)+"."+p.date.slice(5,7);ctx.fillText(label,Math.max(2,p.x-15),h-16);}});
+  }
+  statsMetricButtons.forEach(button=>button.addEventListener("click",()=>{statsMetric=button.dataset.metric;statsMetricButtons.forEach(b=>b.classList.toggle("active",b===button));renderStatistics();showButtonState(button,button.dataset.originalText||button.textContent,"success",800);logAction(`Статистику перемкнено на показник «${button.dataset.originalText||button.textContent}».`);}));
+  [statsFrom,statsTo].forEach(input=>input?.addEventListener("change",()=>{if(statsFrom.value&&statsTo.value){const days=Math.round((new Date(statsTo.value)-new Date(statsFrom.value))/86400000);if(days<3){showButtonState(input===statsFrom?statsMetricButtons[0]:statsMetricButtons[0],"Мінімум 3 дні","error",1200);logAction("Період статистики не змінено: мінімальний період 3 дні.");return;}}renderStatistics();logAction(`Період статистики змінено: ${statsFrom.value||"початок"} — ${statsTo.value||"кінець"}.`);}));
+  window.addEventListener("resize",()=>{if(document.getElementById("archive")?.classList.contains("active"))renderStatistics();});
+
+  document.addEventListener("keydown",e=>{
+    if(e.key!=="Escape")return;
+    [productModal,addProductModal,editProductModal,sortProductsModal,deleteProductModal,archiveTextModal].forEach(m=>m?.classList.remove("active"));
+    selectedProduct=null;editingProduct=null;archiveEditingId=null;
+  });
+  productWeight?.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();productCopy.click();}});
+  [newProductName,newProductKcal,newProductProtein,newProductFat,newProductCarb,newProductSugar,newProductSalt].forEach(i=>i?.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addProductSave.click();}}));
+  [editProductName,editProductKcal,editProductProtein,editProductFat,editProductCarb,editProductSugar,editProductSalt].forEach(i=>i?.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();editProductSave.click();}}));
+
+  products=loadArray(PRODUCTS_KEY).map((p,i)=>normalizeProduct(p,i));
+  calculatorItems=loadArray(CALCULATOR_KEY).map(i=>({...i,sugar:number(i.sugar),salt:number(i.salt)}));
+  archiveItems=loadArray(ARCHIVE_KEY);
+  consoleItems=loadArray(CONSOLE_KEY);
+  const draft=localStorage.getItem(CALCULATOR_DRAFT_KEY);if(draft!==null)calcInput.value=draft;
+  renderProducts();renderCalculatorLog();updateTotals();renderArchive();renderConsole();renderStatistics();updateSiteDataCounts();
+
+  const saved=localStorage.getItem(ACTIVE_TAB_KEY)||"blocks";
+  tabs.forEach(t=>t.classList.toggle("active",t.dataset.tab===saved));
+  pages.forEach(p=>p.classList.toggle("active",p.id===saved));
+  if(saved==="archive")requestAnimationFrame(()=>renderStatistics());
+});
